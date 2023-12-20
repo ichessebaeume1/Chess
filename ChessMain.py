@@ -7,21 +7,26 @@ import pygame
 import ChessEngine
 import ChessAI
 
-WIDTH = 512
-HEIGHT = 512
+BOARD_WIDTH = 512
+BOARD_HEIGHT = 512
+MOVE_LOG_WIDTH = 250
+MOVE_LOG_HEIGHT = BOARD_HEIGHT
 DIMENSION = 8
-SQ_SIZE = HEIGHT // DIMENSION
+SQ_SIZE = BOARD_HEIGHT // DIMENSION
 MAX_FPS = 30
 IMAGES = {}
 
-
 # loading in the images and scaling them to be the size of the square
 def load_images():
-    pieces = ["bR", "bB", "bN", "bQ", "bK", "bP", "wR", "wB", "wN", "wQ", "wK", "wP"]
+    pieces = ["bR", "bB", "bN", "bQ", "bK", "bp", "wR", "wB", "wN", "wQ", "wK", "wp"]
     for piece in pieces:
-        IMAGES[piece] = pygame.transform.scale(pygame.image.load(os.path.join("imgs", f"{piece}.png")),
-                                               (SQ_SIZE, SQ_SIZE))
+        IMAGES[piece] = pygame.transform.scale(pygame.image.load(os.path.join("imgs", f"{piece}.png")), (SQ_SIZE, SQ_SIZE))
 
+def draw_game_state(win, gamestate, valid_moves, square_selected, move_log_font):
+    draw_board(win)
+    highlight_squares(win, gamestate, valid_moves, square_selected)
+    draw_pieces(win, gamestate.board)
+    draw_move_log(win, gamestate, move_log_font)
 
 def draw_board(win):
     global colors
@@ -35,22 +40,6 @@ def draw_board(win):
             color = colors[(row + col) % 2]
             pygame.draw.rect(win, color, pygame.Rect(col * SQ_SIZE, row * SQ_SIZE, SQ_SIZE, SQ_SIZE))
 
-
-def draw_pieces(win, board):
-    for row in range(DIMENSION):
-        for col in range(DIMENSION):
-            piece = board[row][col]
-            if piece != "--":
-                win.blit(IMAGES[piece], (col * SQ_SIZE, row * SQ_SIZE))
-
-
-def draw_game_state(win, gamestate, valid_moves, square_selected):
-    draw_board(win)
-    highlight_squares(win, gamestate, valid_moves, square_selected)
-    draw_pieces(win, gamestate.board)
-
-
-# highlights moves and pieces selected
 def highlight_squares(win, gamestate, valid_moves, square_selected):
     if square_selected != ():
         row, col = square_selected
@@ -64,6 +53,35 @@ def highlight_squares(win, gamestate, valid_moves, square_selected):
             for move in valid_moves:
                 if move.start_row == row and move.start_col == col:
                     win.blit(surface, (SQ_SIZE * move.end_col, SQ_SIZE * move.end_row))
+
+def draw_pieces(win, board):
+    for row in range(DIMENSION):
+        for col in range(DIMENSION):
+            piece = board[row][col]
+            if piece != "--":
+                win.blit(IMAGES[piece], (col * SQ_SIZE, row * SQ_SIZE))
+
+def draw_move_log(win, gamestate, move_log_font):
+    move_log_rect = pygame.Rect(BOARD_WIDTH, 0, MOVE_LOG_WIDTH, MOVE_LOG_HEIGHT)
+    pygame.draw.rect(win, pygame.Color("black"), move_log_rect)
+
+    move_log = gamestate.move_log
+    move_texts = []
+
+    padding = 5
+    text_y = padding
+
+    for i in range(0, len(move_log), 2):
+        move_string = f"{i // 2 + 1}. {str(move_log[i])} "
+        if i + 1 < len(move_log):   # black moved
+            move_string += str(move_log[i + 1])
+        move_texts.append(move_string)
+
+    for i in range(len(move_texts)):
+        text_object = move_log_font.render(move_texts[i], True, pygame.Color("Gray"))
+        text_loc = move_log_rect.move(padding, text_y)
+        win.blit(text_object, text_loc)
+        text_y += text_object.get_height()
 
 def animate_move(move, win, board, clock):
     global colors
@@ -83,19 +101,21 @@ def animate_move(move, win, board, clock):
 
         # erase taken piece after animation is done
         if move.piece_captured != "--":
-            win.blit(IMAGES[move.piece_captured], end_square)
+            if move.is_enpassant_move:
+                en_passant_row = (move.end_row + 1) if move.piece_captured[0] == "b" else (move.end_row - 1)
+                end_square = pygame.Rect(move.end_col * SQ_SIZE, en_passant_row * SQ_SIZE, SQ_SIZE, SQ_SIZE)
+                win.blit(IMAGES[move.piece_captured], end_square)
 
         # draw selected piece
         win.blit(IMAGES[move.piece_moved], pygame.Rect(col*SQ_SIZE, row*SQ_SIZE, SQ_SIZE, SQ_SIZE))
         pygame.display.flip()
-        clock.tick(120)
+        clock.tick(0)
 
-
-def draw_text(win, text):
+def draw_end_game_text(win, text):
     font = pygame.font.SysFont("Helvitca", 32, True, False)
 
     text_object = font.render(text, 0, pygame.Color("Gray"))
-    text_loc = pygame.Rect(0, 0, WIDTH, HEIGHT).move(WIDTH/2 - text_object.get_width()/2, HEIGHT/2 - text_object.get_height()/2)
+    text_loc = pygame.Rect(0, 0, BOARD_WIDTH, BOARD_HEIGHT).move(BOARD_WIDTH / 2 - text_object.get_width() / 2, BOARD_HEIGHT / 2 - text_object.get_height() / 2)
     win.blit(text_object, text_loc)
 
     text_object = font.render(text, 0, pygame.Color("Black"))
@@ -104,13 +124,13 @@ def draw_text(win, text):
 
 def main():
     pygame.init()
-    win = pygame.display.set_mode((WIDTH, HEIGHT))
+    win = pygame.display.set_mode((BOARD_WIDTH + MOVE_LOG_WIDTH, BOARD_HEIGHT))
     win.fill(pygame.Color("white"))
 
     clock = pygame.time.Clock()
 
     gamestate = ChessEngine.GameState()
-    valid_moves = gamestate.get_valid_moves()
+    valid_moves = gamestate.getValidMoves()
 
     move_made = False  # keeps track of a move being made so that the program doesn't load the valid moves every frame but only when a move is made
     game_over = False
@@ -123,7 +143,11 @@ def main():
     square_selected = ()  # kep track of last click of user will be a row and a col
     player_clicks = []  # keep track of the player clicks with two tuples. from where to where
 
+    move_log_font = pygame.font.SysFont("Arial", 12, False, False)
+
     load_images()
+
+    rand = 0
 
     run = True
     while run:
@@ -140,8 +164,8 @@ def main():
                     col = location[0] // SQ_SIZE
                     row = location[1] // SQ_SIZE
 
-                    # aka user clicked the same square twice
-                    if square_selected == (row, col):
+                    # aka user clicked the same square twice or user clicked mouse log
+                    if square_selected == (row, col) or col >= 8:
                         square_selected = ()
                         player_clicks = []
                     else:
@@ -155,8 +179,7 @@ def main():
                         for i in range(len(valid_moves)):
                             # only if a move is valid make it
                             if move == valid_moves[i]:
-                                print(move.getChessNotation())
-                                gamestate.make_move(valid_moves[i])
+                                gamestate.makeMove(valid_moves[i])
 
                                 move_made = True
                                 animate = True
@@ -171,21 +194,28 @@ def main():
 
             elif event.type == pygame.KEYDOWN:
                 if event.key == pygame.K_SPACE:
-                    gamestate.undo_move()
+                    gamestate.undoMove()
                     move_made = True
                     animate = False
+                    game_over = False
+
                 elif event.key == pygame.K_r:
                     gamestate = ChessEngine.GameState()
-                    valid_moves = gamestate.get_valid_moves()
+                    valid_moves = gamestate.getValidMoves()
                     square_selected = ()
                     player_clicks = []
                     move_made = False
                     animate = False
+                    game_over = False
 
         # AI logic
         if not game_over and not human_turn:
-            AI_move = ChessAI.find_random_move(valid_moves)
-            gamestate.make_move(AI_move)
+            AI_move = ChessAI.find_best_move(gamestate, valid_moves)
+            if AI_move is None:
+                AI_move = ChessAI.find_random_move(valid_moves)
+                rand += 1
+                print("Random Move: ", rand)
+            gamestate.makeMove(AI_move)
             move_made = True
             animate = True
 
@@ -193,21 +223,26 @@ def main():
         if move_made:
             if animate:
                 animate_move(gamestate.move_log[-1], win, gamestate.board, clock)
-            valid_moves = gamestate.get_valid_moves()
+            valid_moves = gamestate.getValidMoves()
             move_made = False
             animate = False
 
-        draw_game_state(win, gamestate, valid_moves, square_selected)
+        draw_game_state(win, gamestate, valid_moves, square_selected, move_log_font)
 
         if gamestate.checkmate:
             game_over = True
-            if gamestate.white_to_move:
-                draw_text(win, "Black wins by Checkmate")
-            else:
-                draw_text(win, "White wins by Checkmate")
-        elif gamestate.stalemate:
+            text = "Stalemate" if gamestate.stalemate else "Black wins by Checkmate" if gamestate.white_to_move else "White wins by Checkmate"
+            draw_end_game_text(win, text)
+
+        if gamestate.move_draw:
             game_over = True
-            draw_text(win, "Stalemate")
+            text = "Draw by 50 Move Rule"
+            draw_end_game_text(win, text)
+
+        if gamestate.rep_stalemate:
+            game_over = True
+            text = "Stalemate by Repetition"
+            draw_end_game_text(win, text)
 
         clock.tick(MAX_FPS)
         pygame.display.flip()
@@ -215,17 +250,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-# IDEAS:
-# add config to replace color scheme of the board
-# improve chess notation
-# display which colors turn it is
-# add option for promotion (optional parameter for Move)
-# highlight last move (in highlight squares)
-# turn animations on or off in config
-# speed of animation in config
-# multiple difficulties for AI
-# draws
-
-# BUGS:
-# when moving left knight turns don't switch
