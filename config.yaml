@@ -1,0 +1,21 @@
+design:
+  piece_set:
+  first_color:
+  second_color:
+  selection_color:
+  possible_moves_color:
+  highlight_king_check:
+
+animation:
+  show_animations:
+  animation_speed:
+  draw_move_log:
+
+players:
+  player_one_is_not_ai:
+  player_two_is_not_ai:
+
+ai:
+  depth:
+  points_checkmate:
+  points_stalemate:
