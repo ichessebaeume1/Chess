@@ -9,24 +9,32 @@ import ChessAI
 
 BOARD_WIDTH = 512
 BOARD_HEIGHT = 512
+
 MOVE_LOG_WIDTH = 250
 MOVE_LOG_HEIGHT = BOARD_HEIGHT
+
+EVAL_BAR_WIDTH = 32
+EVAL_BAR_HEIGHT = BOARD_HEIGHT
+
 DIMENSION = 8
 SQ_SIZE = BOARD_HEIGHT // DIMENSION
+
 MAX_FPS = 30
+PIECE_PACKAGE = "neo"
 IMAGES = {}
 
 # loading in the images and scaling them to be the size of the square
 def load_images():
     pieces = ["bR", "bB", "bN", "bQ", "bK", "bp", "wR", "wB", "wN", "wQ", "wK", "wp"]
     for piece in pieces:
-        IMAGES[piece] = pygame.transform.scale(pygame.image.load(os.path.join("imgs", f"{piece}.png")), (SQ_SIZE, SQ_SIZE))
+        IMAGES[piece] = pygame.transform.scale(pygame.image.load(os.path.join(f"pieces/{PIECE_PACKAGE}", f"{piece}.png")), (SQ_SIZE, SQ_SIZE))
 
-def draw_game_state(win, gamestate, valid_moves, square_selected, move_log_font):
+def draw_game_state(win, gamestate, valid_moves, square_selected, move_log_font, eval_font):
     draw_board(win)
     highlight_squares(win, gamestate, valid_moves, square_selected)
     draw_pieces(win, gamestate.board)
     draw_move_log(win, gamestate, move_log_font)
+    #draw_eval_bar(win, gamestate, eval_font)
 
 def draw_board(win):
     global colors
@@ -83,6 +91,21 @@ def draw_move_log(win, gamestate, move_log_font):
         win.blit(text_object, text_loc)
         text_y += text_object.get_height()
 
+def draw_eval_bar(win, gamestate, eval_font):
+    eval_bar_rect = pygame.Rect(-BOARD_WIDTH, 0, EVAL_BAR_WIDTH, EVAL_BAR_HEIGHT)
+    pygame.draw.rect(win, pygame.Color("white"), eval_bar_rect)
+
+    eval = ChessEngine.GameState()
+    evaluation_score = eval.evaluate(gamestate.board)
+
+    if evaluation_score < 0:
+        text_object = eval_font.render(str(evaluation_score), True, pygame.Color("Black"))
+        win.blit(text_object, (732, 500))
+    else:
+        text_object = eval_font.render(str(evaluation_score), True, pygame.Color("Black"))
+        win.blit(text_object, (732, 0))
+
+
 def animate_move(move, win, board, clock):
     global colors
     delta_row = move.end_row - move.start_row
@@ -132,6 +155,9 @@ def main():
     gamestate = ChessEngine.GameState()
     valid_moves = gamestate.getValidMoves()
 
+    zobrist_keys = ChessAI.generate_zobrist_keys()
+    print(zobrist_keys, len(zobrist_keys))
+
     move_made = False  # keeps track of a move being made so that the program doesn't load the valid moves every frame but only when a move is made
     game_over = False
     animate = False
@@ -144,6 +170,7 @@ def main():
     player_clicks = []  # keep track of the player clicks with two tuples. from where to where
 
     move_log_font = pygame.font.SysFont("Arial", 12, False, False)
+    eval_font = pygame.font.SysFont("Arial", 12, False, False)
 
     load_images()
 
@@ -215,6 +242,7 @@ def main():
                 AI_move = ChessAI.find_random_move(valid_moves)
                 rand += 1
                 print("Random Move: ", rand)
+            print(ChessAI.get_position_zobrist(gamestate.board, zobrist_keys))
             gamestate.makeMove(AI_move)
             move_made = True
             animate = True
@@ -227,7 +255,7 @@ def main():
             move_made = False
             animate = False
 
-        draw_game_state(win, gamestate, valid_moves, square_selected, move_log_font)
+        draw_game_state(win, gamestate, valid_moves, square_selected, move_log_font, eval_font)
 
         if gamestate.checkmate:
             game_over = True
@@ -250,3 +278,35 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# IDEAS:
+# add config to replace color scheme of the board
+# improve chess notation (+ for check and = for pawn promotion)
+# display which colors turn it is
+# highlight last move (in highlight squares)
+# turn animations on or off in config
+# speed of animation in config
+# draws
+# highlight king check
+# add position evaluation bar
+# trash talking
+# arrows
+# giving out the best move on click
+# stalemate on repeated moves (move log)
+# move log display fix (off-screen after a number of moves) (add scroll)
+# clock / timer
+# UI
+# fen to board
+
+# AI
+# end game maps
+# positional rewards
+# multiple difficulties for AI
+# reward castling
+# reward king pos
+# attacking and defending squares
+# avoid moving back in the next move
+# get onto squares that are protected (don't hang your pieces)
+# pawn chains
+# teach openings
+# transpositions for faster evaluation and more depth
