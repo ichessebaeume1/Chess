@@ -1,21 +1,27 @@
 design:
-  piece_set:
-  first_color:
-  second_color:
-  selection_color:
-  possible_moves_color:
-  highlight_king_check:
+  piece_set: "standard"
+  first_color: "white"
+  second_color: "gray"
+  selection_color: "blue"
+  possible_moves_color: "yellow"
+  highlight_king_check: False
 
 animation:
-  show_animations:
-  animation_speed:
-  draw_move_log:
+  max_fps: 30
+  animation_speed: 0
 
-players:
-  player_one_is_not_ai:
-  player_two_is_not_ai:
+game:
+  player_one_is_not_ai: False
+  player_two_is_not_ai: False
+  start_fen: None   # http://www.netreal.de/Forsyth-Edwards-Notation/index.php
 
 ai:
-  depth:
-  points_checkmate:
-  points_stalemate:
+  version: "v4"
+  depth: 3
+  castling_score: 1
+  protect_square_score: 1
+  check_punish: 2
+  positional_weight: 0.1
+  move_repetition_punish: 1
+  points_checkmate: 1000
+  points_stalemate: 0

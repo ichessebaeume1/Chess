@@ -1,4 +1,9 @@
 import random
+import yaml
+
+# load the config
+with open("config.yaml") as f:
+    cfg = yaml.load(f, Loader=yaml.FullLoader)
 
 knight_scores = [[-50, -40, -30, -30, -30, -30, -40, -50],
                  [-40, -20, 0, 0, 0, 0, -20, -40],
@@ -43,7 +48,7 @@ pawn_scores = [[0, 0, 0, 0, 0, 0, 0, 0],
                [0, 0, 0, 20, 20, 0, 0, 0],
                [5, -5, -10, 0, 0, -10, -5, 5],
                [5, 10, 10, -20, -20, 10, 10, 5],
-               [0, 0, 0, 0, 0, 0, 0, 0]]
+               [20, 20, 20, 20, 20, 20, 20, 20]]
 
 king_scores = [[-30, -40, -40, -50, -50, -40, -40, -30],
                [-30, -40, -40, -50, -50, -40, -40, -30],
@@ -79,12 +84,198 @@ piece_position_scores = {"wN": knight_scores,
 piece_value = {"K": 0, "Q": 9, "R": 5, "B": 3, "N": 3, "p": 1}
 pieces = ["bB", "bK", "bN", "bp", "bQ", "bR", "wB", "wK", "wN", "wp", "wQ", "wR"]
 
-CHECKMATE = 1000
-CASTLE = 10
-MOVE_REP_PUNISH = 3
-POSITION_WIGHT = .1
-STALEMATE = 0
-DEPTH = 3  # the moves that the engine looks ahead
+CHECKMATE = cfg["ai"]["points_checkmate"]
+CASTLING_SCORE = cfg["ai"]["castling_score"]
+MOVE_REP_PUNISH = cfg["ai"]["move_repetition_punish"]
+POSITION_WEIGHT = cfg["ai"]["positional_weight"]
+STALEMATE = cfg["ai"]["points_stalemate"]
+DEPTH = cfg["ai"]["depth"]  # the moves that the engine looks ahead
+
+
+def find_best_move(gamestate, valid_moves, zobrist_keys, transposition_table, print_usage):
+    global next_move, transposition_table_hits
+    transposition_table_hits = 0
+    next_move = None
+
+    if cfg["ai"]["version"] == "v4":
+        score = find_move_v4(gamestate, valid_moves, DEPTH, -CHECKMATE, CHECKMATE, 1 if gamestate.white_to_move else -1, zobrist_keys, transposition_table)
+        if print_usage:
+            print(f"Used the transposition table for this move {transposition_table_hits} time(s).")
+            print(f"The transposition table now contains {len(transposition_table)} different board states.")
+            print(f"The score of the move {next_move} was {score}")
+    elif cfg["ai"]["version"] == "v3":
+        find_move_v3(gamestate, valid_moves, DEPTH, -CHECKMATE, CHECKMATE, 1 if gamestate.white_to_move else -1)
+    elif cfg["ai"]["version"] == "v2":
+        # greedy alg.
+        pass
+    elif cfg["ai"]["version"] == "v1":
+        find_random_move(valid_moves)
+
+    return next_move
+
+
+def find_move_v4(gamestate, valid_moves, depth, alpha, beta, turn_multiplier, zobrist_keys, transposition_table):
+    global next_move, transposition_table_hits
+
+    zobrist_key = get_position_zobrist(gamestate.board, zobrist_keys)
+    transposition_table_entry = check_zobrist_position(zobrist_key, transposition_table)
+
+    if transposition_table_entry is not None and transposition_table_entry["depth"] >= depth:
+        transposition_table_hits += 1  # Increment the counter
+        return transposition_table_entry["score"]
+
+    if depth == 0:
+        return turn_multiplier * score_board_v4(gamestate)
+
+    max_score = -CHECKMATE
+
+    for move in valid_moves:
+
+        gamestate.makeMove(move)
+
+        # what to do if he didnt
+        next_moves = gamestate.getValidMoves()
+        score = -find_move_v4(gamestate, next_moves, depth - 1, -beta, -alpha, -turn_multiplier, zobrist_keys, transposition_table)
+
+        if score > max_score:
+            max_score = score
+            if depth == DEPTH:
+                next_move = move
+
+        gamestate.undoMove()
+
+        if max_score > alpha:
+            alpha = max_score
+        if alpha >= beta:
+            break
+
+    add_zobrist_position(zobrist_key, transposition_table, max_score, alpha, beta, depth)
+
+    return max_score
+
+
+def find_move_v3(gamestate, valid_moves, depth, alpha, beta, turn_multiplier):
+    global next_move
+
+    if depth == 0:
+        return turn_multiplier * score_board_v3(gamestate)
+
+    max_score = -CHECKMATE
+
+    for move in valid_moves:
+
+        gamestate.makeMove(move)
+
+        next_moves = gamestate.getValidMoves()
+        score = -find_move_v3(gamestate, next_moves, depth - 1, -beta, -alpha, -turn_multiplier)
+
+        if score > max_score:
+            max_score = score
+            if depth == DEPTH:
+                next_move = move
+
+        gamestate.undoMove()
+
+        if max_score > alpha:
+            alpha = max_score
+        if alpha >= beta:
+            break
+
+    return max_score
+
+
+# positive score == white is winning, negative score == black is winning
+def score_board_v4(gamestate):
+    if gamestate.checkmate:
+        if gamestate.white_to_move:
+            return -CHECKMATE
+        else:
+            return CHECKMATE
+    elif gamestate.stalemate:
+        return STALEMATE
+
+    score = 0
+
+    for row in range(len(gamestate.board)):
+        for col in range(len(gamestate.board[row])):
+            square = gamestate.board[row][col]
+            if square != "--":
+                color = square[0]
+                type = square[1]
+
+                if color == "w":
+                    piece_position_score = piece_position_scores["w" + type][row][col]
+                    in_check, pins, checks = gamestate.checkForPinsAndChecks()
+
+                    score += piece_value[square[1]] + piece_position_score * POSITION_WEIGHT
+
+                    if len(gamestate.move_log) > 3:
+                        if str(gamestate.move_log[-1]) == str(gamestate.move_log[-3]):
+                            score -= MOVE_REP_PUNISH
+                        if str(gamestate.move_log[-1]) == "Kc1":
+                            score += CASTLING_SCORE
+                        elif str(gamestate.move_log[-1]) == "Kg1":
+                            score += CASTLING_SCORE
+
+                    """if in_check:
+                        score -= cfg["ai"]["check_punish"]
+
+                    if (len(pins) and len(checks)) > 0:
+                        for punish in range(len(pins)):
+                            score -= punish + 1
+
+                        for punish in range(len(checks)):
+                            score -= punish + 2"""
+
+                elif color == "b":
+                    piece_position_score = piece_position_scores["b" + type][row][col]
+
+                    score -= piece_value[square[1]] + piece_position_score * POSITION_WEIGHT
+
+                    if len(gamestate.move_log) > 3:
+                        if str(gamestate.move_log[-1]) == str(gamestate.move_log[-3]):
+                            score += MOVE_REP_PUNISH
+                        if str(gamestate.move_log[-1]) == "Kg8":
+                            score -= CASTLING_SCORE
+                        elif str(gamestate.move_log[-1]) == "Kc8":
+                            score -= CASTLING_SCORE
+
+                if gamestate.move_log[-1] == ("Kc1" or "Kg1" or "Kc8" or "Kg8" or "0-0" or "0-0-0"):
+                    print("Found King Castle Move")
+                    with open("king_moves.txt", "a") as file:
+                        file.write(f"King Move {gamestate.move_log[-1]} had a score of {score}\n")
+
+    return score
+
+
+# positive score == white is winning, negative score == black is winning
+def score_board_v3(gamestate):
+    if gamestate.checkmate:
+        if gamestate.white_to_move:
+            return -CHECKMATE
+        else:
+            return CHECKMATE
+    elif gamestate.stalemate:
+        return STALEMATE
+
+    score = 0
+
+    for row in range(len(gamestate.board)):
+        for col in range(len(gamestate.board[row])):
+            square = gamestate.board[row][col]
+            if square != "--":
+                color = square[0]
+                type = square[1]
+
+                if color == "w":
+                    piece_position_score = piece_position_scores["w" + type][row][col]
+                    score += piece_value[square[1]] + piece_position_score * POSITION_WEIGHT
+
+                elif color == "b":
+                    piece_position_score = piece_position_scores["b" + type][row][col]
+                    score -= piece_value[square[1]] + piece_position_score * POSITION_WEIGHT
+
+    return score
 
 
 def generate_zobrist_keys():
@@ -97,6 +288,7 @@ def generate_zobrist_keys():
 
     return zobrist_keys
 
+
 def get_position_zobrist(board, zobrist_keys):
     key = 0
 
@@ -108,80 +300,62 @@ def get_position_zobrist(board, zobrist_keys):
 
     return key
 
+
+def check_zobrist_position(zobrist_key, transposition_table):
+    try:
+        transposition_table_entry = transposition_table[zobrist_key]
+        return transposition_table_entry
+
+    except KeyError:
+        return None
+
+
+def add_zobrist_position(zobrist_key, transposition_table, score, alpha, beta, depth):
+    transposition_table[zobrist_key] = {"depth": depth, "score": score, "alpha": alpha, "beta": beta}
+
+
+def get_square_state(gamestate):
+    white_protected_squares = []
+    black_protected_squares = []
+    white_squares_under_attack = []
+    black_squares_under_attack = []
+
+    # check for each piece what valid moves it has
+    for row in range(len(gamestate.board)):
+        for col in range(len(gamestate.board[row])):
+            piece = gamestate.board[row][col]
+
+            # put the squares which are protected by all pieces in total into a list of protected squares
+            for white_piece in piece[0] == "w":
+                pass
+                # add the moves to the list of whites protected squares
+
+            for black_piece in piece[0] == "b":
+                pass
+                # add the moves to the list of blacks protected squares
+
+    # set the white protected squares equal to the squares under attack of black and vise versa
+    # return a list of all squares protected
+    return white_protected_squares, white_squares_under_attack, black_protected_squares, black_squares_under_attack
+
+
+def on_square_protected(gamestate, piece_loc, squares_under_attack):
+    # return true when a given piece is on a protected square
+    pass
+
+
+def on_square_under_attack(gamestate, piece_loc, squares_under_attack):
+    # return true when a given piece is on a square which is under attack
+    pass
+
+
 def find_random_move(valid_moves):
     return random.choice(valid_moves)
 
-
-def find_best_move(gamestate, valid_moves):
-    global next_move
-    next_move = None
-    find_move_nega_max_alpha_beta(gamestate, valid_moves, DEPTH, -CHECKMATE, CHECKMATE,
-                                  1 if gamestate.white_to_move else -1)
-    return next_move
-
-
-def find_move_nega_max_alpha_beta(game_state, valid_moves, depth, alpha, beta, turn_multiplier):
-    global next_move
-
-    if depth == 0:
-        return turn_multiplier * score_board(game_state)
-
-    max_score = -CHECKMATE
-
-    for move in valid_moves:
-
-        game_state.makeMove(move)
-        next_moves = game_state.getValidMoves()
-        score = -find_move_nega_max_alpha_beta(game_state, next_moves, depth - 1, -beta, -alpha, -turn_multiplier)
-
-        if score > max_score:
-            max_score = score
-            if depth == DEPTH:
-                next_move = move
-
-        game_state.undoMove()
-
-        if max_score > alpha:
-            alpha = max_score
-        if alpha >= beta:
-            break
-
-    return max_score
-
-
-# positive score == white is winning, negative score == black is winning
-def score_board(gamestate):
-    if gamestate.checkmate:
-        if gamestate.white_to_move:
-            return -CHECKMATE  # black wins
-        else:
-            return CHECKMATE
-    elif gamestate.stalemate:
-        return STALEMATE
-
-    score = 0
-    piece_position_score = 0
-
-    for row in range(len(gamestate.board)):
-        for col in range(len(gamestate.board[row])):
-            square = gamestate.board[row][col]
-            if square != "--":
-                color = square[0]
-                type = square[1]
-                if color == "w":
-                    piece_position_score = piece_position_scores["w" + type][row][col]
-                elif color == "b":
-                    piece_position_score = piece_position_scores["b" + type][row][col]
-
-            if square[0] == "w":
-                score += piece_value[square[1]] + piece_position_score * POSITION_WIGHT
-                """if len(gamestate.move_log) > 5:
-                    if gamestate.move_log[-1] == gamestate.move_log[-5]:
-                        score += MOVE_REP_PUNISH"""
-            elif square[0] == "b":
-                score -= piece_value[square[1]] + piece_position_score * POSITION_WIGHT
-                """if len(gamestate.move_log) > 5:
-                    if gamestate.move_log[-1] == gamestate.move_log[-5]:
-                        score -= MOVE_REP_PUNISH"""
-
-    return score
+# stages:
+# random
+# greedy
+# min max
+# alpha beta pruning
+# transposition tables
+# improvement of board scoring

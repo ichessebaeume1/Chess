@@ -2,17 +2,22 @@ import os
 os.environ['PYGAME_HIDE_SUPPORT_PROMPT'] = "hide"
 import pygame
 
+
 class GameState:
-    def __init__(self):
-        self.board = [
-            ["bR", "bN", "bB", "bQ", "bK", "bB", "bN", "bR"],
-            ["bp", "bp", "bp", "bp", "bp", "bp", "bp", "bp"],
-            ["--", "--", "--", "--", "--", "--", "--", "--"],
-            ["--", "--", "--", "--", "--", "--", "--", "--"],
-            ["--", "--", "--", "--", "--", "--", "--", "--"],
-            ["--", "--", "--", "--", "--", "--", "--", "--"],
-            ["wp", "wp", "wp", "wp", "wp", "wp", "wp", "wp"],
-            ["wR", "wN", "wB", "wQ", "wK", "wB", "wN", "wR"]]
+    def __init__(self, fen=None):
+        if fen is None:
+            self.board = [
+                ["bR", "bN", "bB", "bQ", "bK", "bB", "bN", "bR"],
+                ["bp", "bp", "bp", "bp", "bp", "bp", "bp", "bp"],
+                ["--", "--", "--", "--", "--", "--", "--", "--"],
+                ["--", "--", "--", "--", "--", "--", "--", "--"],
+                ["--", "--", "--", "--", "--", "--", "--", "--"],
+                ["--", "--", "--", "--", "--", "--", "--", "--"],
+                ["wp", "wp", "wp", "wp", "wp", "wp", "wp", "wp"],
+                ["wR", "wN", "wB", "wQ", "wK", "wB", "wN", "wR"]]
+        else:
+            self.board = self.fen_to_board(fen)
+
         self.moveFunctions = {"p": self.getPawnMoves, "R": self.getRookMoves, "N": self.getKnightMoves,
                               "B": self.getBishopMoves, "Q": self.getQueenMoves, "K": self.getKingMoves}
         self.white_to_move = True
@@ -32,6 +37,9 @@ class GameState:
         self.current_castling_rights = CastleRights(True, True, True, True)
         self.castle_rights_log = [CastleRights(self.current_castling_rights.wks, self.current_castling_rights.bks,
                                                self.current_castling_rights.wqs, self.current_castling_rights.bqs)]
+        self.fullmove_number = 0
+        self.halfmove_clock = 0
+        self.castling_availability = "KQkq"
 
         self.SOUNDS = {}
         sounds = ["capture", "castle", "game-end", "game-start", "illegal", "move-check", "move-normal", "promote", "tenseconds"]
@@ -52,10 +60,10 @@ class GameState:
 
         # pawn promotion
         if move.is_pawn_promotion:
-            #if not is_AI:
-            #    promoted_piece = input("Promote to Q, R, B, or N:") #take this to UI later
-            #    self.board[move.end_row][move.end_col] = move.piece_moved[0] + promoted_piece
-            #else:
+            # if not is_AI:
+            #    # promoted_piece = input("Promote to Q, R, B, or N:") #take this to UI later
+            #    # self.board[move.end_row][move.end_col] = move.piece_moved[0] + promoted_piece
+            # else:
             self.board[move.end_row][move.end_col] = move.piece_moved[0] + "Q"
 
         # enpassant move
@@ -85,6 +93,18 @@ class GameState:
         self.updateCastleRights(move)
         self.castle_rights_log.append(CastleRights(self.current_castling_rights.wks, self.current_castling_rights.bks,
                                                    self.current_castling_rights.wqs, self.current_castling_rights.bqs))
+
+        # Update fullmove number and halfmove clock
+        if self.white_to_move:
+            self.fullmove_number += 1
+        self.halfmove_clock += 1
+
+        # Reset halfmove clock if a capture or pawn move occurs
+        if move.piece_captured or move.piece_moved[1] == 'p':
+            self.halfmove_clock = 0
+
+        # Update the castling_availability string based on the current_castling_rights
+        self.castling_availability = ('K' if self.current_castling_rights.wks else '') + ('Q' if self.current_castling_rights.wqs else '') + ('k' if self.current_castling_rights.bks else '') + ('q' if self.current_castling_rights.bqs else '')
 
         """if move.piece_captured != "--" and not move.is_pawn_promotion:
             self.SOUNDS["capture"].play()
@@ -130,6 +150,59 @@ class GameState:
             self.checkmate = False
             self.stalemate = False
 
+    # FIX BUG WITH VALID MOVES
+    def fen_to_board(self, fen):
+        board = []
+        for row in fen.split('/'):
+            brow = []
+            for col in row:
+                if col == ' ':
+                    break
+                elif col in '12345678':
+                    brow.extend(['--'] * int(col))
+                elif col == 'p':
+                    brow.append('bp')
+                elif col == 'P':
+                    brow.append('wp')
+                elif col > 'Z':
+                    brow.append('b' + col.upper())
+                else:
+                    brow.append('w' + col)
+
+            board.append(brow)
+        return board
+
+    # NOT FINISHED
+    def board_to_fen(self):
+        fen = ''
+        for row in self.board:
+            empty_count = 0
+            for square in row:
+                if square == '--':
+                    empty_count += 1
+                else:
+                    if empty_count > 0:
+                        fen += str(empty_count)
+                        empty_count = 0
+                    fen += square[1].lower() if square[0] == 'b' else square[1].upper()
+            if empty_count > 0:
+                fen += str(empty_count)
+            fen += '/'
+
+        fen = fen[:-1]  # Remove the trailing '/'
+        fen += ' ' + ('w' if self.white_to_move else 'b') + ' ' + self.castling_availability + ' ' + \
+               ('-' if self.enpassant_possible == () else self.coordinate_to_square(self.enpassant_possible)) + \
+               ' ' + str(self.halfmove_clock) + ' ' + str(self.fullmove_number)
+        return fen
+
+    @staticmethod
+    def coordinate_to_square(coord):
+        file_mapping = {0: 'a', 1: 'b', 2: 'c', 3: 'd', 4: 'e', 5: 'f', 6: 'g', 7: 'h'}
+        rank = 8 - coord[0]
+        file = file_mapping[coord[1]]
+        return file + str(rank)
+
+    # An evaluation function based on the scoring of the ai
     def evaluate(self, board):
         # material values
         piece_values = {"K": 0, "Q": 9, "R": 5, "B": 3, "N": 3, "p": 1}
@@ -215,7 +288,7 @@ class GameState:
                             break
                 # get rid of any moves that don't block check or move king
                 for i in range(len(moves) - 1, -1, -1):  # iterate through the list backwards when removing elements
-                    if moves[i].piece_moved[1] != "K":  # move doesn't move king so it must block or capture
+                    if moves[i].piece_moved[1] != "K":  # move doesn't move king, so it must block or capture
                         if not (moves[i].end_row,
                                 moves[i].end_col) in valid_squares:  # move doesn't block or capture piece
                             moves.remove(moves[i])
@@ -242,7 +315,7 @@ class GameState:
 
         if len(self.move_log) > 6 and self.move_log[-1] == self.move_log[-3] == self.move_log[-5]:
             self.rep_stalemate = True
-            #self.SOUNDS["game-end"].play()
+            # self.SOUNDS["game-end"].play()
 
         self.current_castling_rights = temp_castle_rights
         return moves
@@ -422,8 +495,7 @@ class GameState:
             if self.pins[i][0] == row and self.pins[i][1] == col:
                 piece_pinned = True
                 pin_direction = (self.pins[i][2], self.pins[i][3])
-                if self.board[row][col][
-                    1] != "Q":  # can't remove queen from pin on rook moves, only remove it on bishop moves
+                if self.board[row][col][1] != "Q":  # can't remove queen from pin on rook moves, only remove it on bishop moves
                     self.pins.remove(self.pins[i])
                 break
 
@@ -510,7 +582,7 @@ class GameState:
             end_col = col + col_moves[i]
             if 0 <= end_row <= 7 and 0 <= end_col <= 7:
                 end_piece = self.board[end_row][end_col]
-                if end_piece[0] != ally_color:  # not an ally piece - empty or enemy
+                if end_piece[0] != ally_color:  # not an allied piece - empty or enemy
                     # place king on end square and check for checks
                     if ally_color == "w":
                         self.white_king_location = (end_row, end_col)
