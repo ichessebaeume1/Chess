@@ -1,4 +1,4 @@
-name: SonarCloud
+name: Build
 on:
   push:
     branches:
@@ -6,21 +6,14 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 jobs:
-  sonarcloud:
-    name: SonarCloud
-    runs-on: ubuntu-latest
+  sonarqube:
+    name: SonarQube
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Shallow clones should be disabled for a better relevancy of analysis
-
-      - name: SonarCloud Scan
-        # Use v5.0.0 which includes the Java 17 runtime required by SonarCloud
-        uses: SonarSource/sonarqube-scan-action@v5.0.0
+          fetch-depth: 0  # Shallow clones should be disabled for a better relevancy of analysis
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v6
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: https://sonarcloud.io
-        with:
-          args: >
-            -Dsonar.projectKey=ichessebaeume1_Chess
-            -Dsonar.organization=ichessebaeume1
